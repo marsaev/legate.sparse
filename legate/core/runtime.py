@@ -66,6 +66,7 @@ from .machine import Machine, ProcessorKind
 from .projection import is_identity_projection, pack_symbolic_projection_repr
 from .restriction import Restriction
 from .shape import Shape
+from .utils import dlopen_no_autoclose
 
 if TYPE_CHECKING:
     from . import ArgumentMap, Detach, IndexDetach, IndexPartition, Library
@@ -984,17 +985,27 @@ class CommunicatorManager:
     def __init__(self, runtime: Runtime) -> None:
         self._runtime = runtime
         self._nccl = NCCLCommunicator(runtime)
-        self._cpu = CPUCommunicator(runtime)
+
+        self._cpu = (
+            None if settings.disable_mpi() else CPUCommunicator(runtime)
+        )
 
     def destroy(self) -> None:
         self._nccl.destroy()
-        self._cpu.destroy()
+        if self._cpu:
+            self._cpu.destroy()
 
     def get_nccl_communicator(self) -> Communicator:
         return self._nccl
 
     def get_cpu_communicator(self) -> Communicator:
+        if self._cpu is None:
+            raise RuntimeError("MPI is disabled")
         return self._cpu
+
+    @property
+    def has_cpu_communicator(self) -> bool:
+        return self._cpu is not None
 
 
 class Runtime:
@@ -1140,6 +1151,10 @@ class Runtime:
         }
 
     @property
+    def has_cpu_communicator(self) -> bool:
+        return self._comm_manager.has_cpu_communicator
+
+    @property
     def legion_runtime(self) -> legion.legion_runtime_t:
         if self._legion_runtime is None:
             self._legion_runtime = legion.legion_runtime_get_runtime()
@@ -1269,7 +1284,12 @@ class Runtime:
             header = library.get_c_header()
             if header is not None:
                 ffi.cdef(header)
-            shared_lib = ffi.dlopen(shared_lib_path)
+            # Don't use ffi.dlopen(), because that will call dlclose()
+            # automatically when the object gets collected, thus removing
+            # symbols that may be needed when destroying C++ objects later
+            # (e.g. vtable entries, which will be queried for virtual
+            # destructors), causing errors at shutdown.
+            shared_lib = dlopen_no_autoclose(ffi, shared_lib_path)
             library.initialize(shared_lib)
             callback_name = library.get_registration_callback()
             callback = getattr(shared_lib, callback_name)

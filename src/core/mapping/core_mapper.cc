@@ -258,7 +258,7 @@ void CoreMapper::select_sharding_functor(const Legion::Mapping::MapperContext ct
 {
   const int launch_dim = fill.index_domain.get_dim();
   assert(launch_dim == 1);
-  output.chosen_functor = context.get_sharding_id(LEGATE_CORE_TOPLEVEL_TASK_SHARD_ID);
+  output.chosen_functor = context->get_sharding_id(LEGATE_CORE_TOPLEVEL_TASK_SHARD_ID);
 }
 
 void CoreMapper::select_steal_targets(const Legion::Mapping::MapperContext ctx,
