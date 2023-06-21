@@ -910,6 +910,8 @@ class ManualTask(Operation, Task):
         self._output_parts: list[Union[StorePartition, None]] = []
         self._reduction_parts: list[tuple[StorePartition, int]] = []
 
+        self._scalar_future_maps: list[FutureMap] = []
+
     @property
     def launch_ndim(self) -> int:
         return self._launch_domain.dim
@@ -1081,6 +1083,9 @@ class ManualTask(Operation, Task):
         launcher.set_concurrent(self.concurrent)
 
         self._add_communicators(launcher, self._launch_domain)
+
+        for future_map in self._scalar_future_maps:
+            launcher.add_future_map(future_map)
 
         result = launcher.execute(self._launch_domain)
         self._demux_scalar_stores(result, self._launch_domain)
