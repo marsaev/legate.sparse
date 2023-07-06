@@ -162,8 +162,9 @@ def get_install_dir():
         return user_site_pkgs
 
     # Otherwise fallback to regular site-packages?
-    if os.path.exists(site_pkgs := site.getsitepackages()):
-        return site_pkgs
+    for site_pkgs in site.getsitepackages():
+        if os.path.exists(site_pkgs):
+            return site_pkgs
 
 
 def install_legion_python_bindings(
@@ -380,6 +381,9 @@ def install(
     # Configure and build legate.core via setup.py
     pip_install_cmd = [sys.executable, "-m", "pip", "install"]
     cmd_env = dict(os.environ.items())
+
+    if "OPENSSL_DIR" not in cmd_env and "CONDA_PREFIX" in cmd_env:
+        cmd_env.update({"OPENSSL_DIR": cmd_env["CONDA_PREFIX"]})
 
     if unknown is not None:
         try:
