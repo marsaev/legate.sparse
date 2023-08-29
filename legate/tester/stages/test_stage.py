@@ -18,7 +18,7 @@ import multiprocessing
 import queue
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 from typing_extensions import Protocol
 
@@ -58,12 +58,6 @@ class TestStage(Protocol):
 
     #: Any fixed stage-specific command-line args to pass
     args: ArgList
-
-    #: Shard assigned to each worker in the pool.
-    #: Each worker in the pool will get a local copy of this attribute,
-    #: will populate it on first touch by pulling from the global shard
-    #: queue, then keep using its assigned shard throughout the run.
-    worker_shard: Union[Shard, None] = None
 
     # --- Protocol methods
 
@@ -254,21 +248,25 @@ class TestStage(Protocol):
             Process execution wrapper
 
         """
-        if self.worker_shard is None:
-            self.worker_shard = self.shards.get()
-
         test_path = config.root_dir / test_file
+
+        shard = self.shards.get()
 
         cov_args = self.cov_args(config)
 
-        stage_args = self.args + self.shard_args(self.worker_shard, config)
+        stage_args = self.args + self.shard_args(shard, config)
         file_args = self.file_args(test_file, config)
 
         cmd = (
             [str(config.legate_path)]
             + stage_args
             + cov_args
-            + [str(test_path)]
+            # If both the python and Realm signal handlers are active, we may
+            # not get good reporting of backtraces on crashes at the C++ level.
+            # We are typically more interested in seeing the backtrace of the
+            # crashing C++ thread, not the python code, so we ask pytest to not
+            # install the python fault handler.
+            + [str(test_path), "-p", "no:faulthandler"]
             + file_args
             + config.extra_args
         )
@@ -276,7 +274,7 @@ class TestStage(Protocol):
         if custom_args:
             cmd += custom_args
 
-        self.delay(self.worker_shard, config, system)
+        self.delay(shard, config, system)
 
         result = system.run(
             cmd,
@@ -285,6 +283,8 @@ class TestStage(Protocol):
             timeout=config.timeout,
         )
         log_proc(self.name, result, config, verbose=config.verbose)
+
+        self.shards.put(shard)
 
         return result
 
