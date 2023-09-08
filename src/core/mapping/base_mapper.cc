@@ -1199,11 +1199,27 @@ void BaseMapper::map_partition(const Legion::Mapping::MapperContext ctx,
                                const MapPartitionInput& input,
                                MapPartitionOutput& output)
 {
+  // Partitions have to use system or socket memories, so there isn't a point
+  // in trying to parse out the machine descriptor from the Partition's
+  // mapping arguments.
+  bool useSocketMem = machine.has_omps();
   Processor target_proc{Processor::NO_PROC};
-  if (machine.has_omps())
-    target_proc = machine.omps().front();
-  else
-    target_proc = machine.cpus().front();
+  auto local_procs = useSocketMem ? machine.omps() : machine.cpus();
+  if (partition.is_index_space) {
+    // If we have an index space partition operation, slice the index space
+    // to find the right processor to map each sub-region to.
+    Domain space      = partition.index_domain;
+    auto* key_functor = find_legate_projection_functor(0);
+    auto lo           = key_functor->project_point(partition.index_domain.lo(), space);
+    auto hi           = key_functor->project_point(partition.index_domain.hi(), space);
+    auto p            = key_functor->project_point(partition.index_point, space);
+    auto global_idx   = linearize(lo, hi, p);
+    auto local_idx    = global_idx - (machine.local_node * local_procs.size());
+    target_proc       = local_procs[local_idx];
+  } else {
+    // If not, just use the first processor of the right kind.
+    target_proc = local_procs.front();
+  }
 
   auto store_target = default_store_targets(target_proc.kind()).front();
 
